@@ -63,13 +63,31 @@ func writeHandler(w http.ResponseWriter, r *http.Request, port string) {
 
 		// phase 2 of 2PC
 		fmt.Println("Primary: --- Phase 2 ---")
-		// writes the key value pair to storage
 		commit := fmt.Sprintf("http://localhost:8002/write?key=%s&value=%s", key, value)
+		// writes the key value pair to storage
 		// go routine used so primary node does not have to wait for backup's writing to storage
 		go http.Get(commit)
 	}
 
+	// adds to database
 	database[key] = value
+
+	// creates a file name for each port
+	filename := fmt.Sprintf("%s.log", port)
+	// opens the file associated with the port and edits it based off of flags
+	// O_CREATE creates the file if it does not exist
+	// O_WRONLY writes to the file if it is empty
+	// O_APPEND writes at the end of the file if there is data already written
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// checks for error when opening
+	if err != nil {
+		fmt.Println("Error opening file")
+	}
+	// closes file to prevent corruption and leaking
+	defer file.Close()
+
+	fmt.Fprintf(file, "%s,%s\n", key, value)
+
 	// prints database to show consistency
 	fmt.Println("Database: ", database)
 }

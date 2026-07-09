@@ -7,6 +7,7 @@
 2. **Two Phase Commit (2PC):** Includes 2PC for consistency in data in case of failures in backup node using the '/prepare' and '/write' phases
 3. **Asynchronous Commit:** Uses go routines to improve efficiency in writes to backup nodes after 2PC
 4. **Status Check:** Includes '/status' and '/read' handlers to keep track of memory across all nodes 
+
 (Version 2)
 5. **Data Persistence:** Writes data to logs after 2PC for persistent storage
 6. **Bootstrap Replay** On startup, sees if previous data was stored in logs and writes to database

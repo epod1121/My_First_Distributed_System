@@ -2,13 +2,10 @@
 ### My first ever distributed System!
 
 ## Main Features
-(Version 1)
 1. **Multiple nodes:** This program allows for multiple localhost ports to run concurrently with one another (localhost:8001, localhost:8002, etc.)
 2. **Two Phase Commit (2PC):** Includes 2PC for consistency in data in case of failures in backup node using the '/prepare' and '/write' phases
 3. **Asynchronous Commit:** Uses go routines to improve efficiency in writes to backup nodes after 2PC
 4. **Status Check:** Includes '/status' and '/read' handlers to keep track of memory across all nodes 
-
-(Version 2)
 5. **Data Persistence:** Writes data to logs after 2PC for persistent storage
 6. **Bootstrap Replay** On startup, sees if previous data was stored in logs and writes to database
 

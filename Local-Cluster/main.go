@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 )
 
 // global so it does not have to be passed from main
@@ -14,10 +16,33 @@ func main() {
 	port := os.Args[1]
 	fmt.Println("Starting Program")
 
+	// creates a file for each port that starts
+	filename := fmt.Sprintf("%s.log", port)
+	// before all of the handle funcs, open previously logged data (if any)
+	// to read and have ready for each node
+	file, exist := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0644)
+	// if the file does not exist, continue on
+	if exist != nil {
+		fmt.Println("No file found")
+		// if the file does exist, read the contents of it
+	} else {
+		// open scanner
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			// get data line by line from the file
+			line := scanner.Text()
+
+			// parses up the data from the files while scanning
+			parts := strings.Split(line, ",")
+			// writes the data to the database
+			database[parts[0]] = parts[1]
+		}
+	}
+
 	// handle funcs for different node tools and passing port to the handlers
 
 	http.HandleFunc("/write", func(w http.ResponseWriter, r *http.Request) {
-		writeHandler(w, r, port)
+		writeHandler(w, r, port, filename)
 	})
 	http.HandleFunc("/prepare", func(w http.ResponseWriter, r *http.Request) {
 		prepareHandler(w, r, port)
@@ -38,7 +63,7 @@ func main() {
 // used to handle key/value init from url
 // 2 phase commit
 // as well as handle primary node (in this case node 8001 was hard coded in for simplicity when testing)
-func writeHandler(w http.ResponseWriter, r *http.Request, port string) {
+func writeHandler(w http.ResponseWriter, r *http.Request, port string, filename string) {
 
 	// gets key and value stored
 	key := r.URL.Query().Get("key")
@@ -72,8 +97,6 @@ func writeHandler(w http.ResponseWriter, r *http.Request, port string) {
 	// adds to database
 	database[key] = value
 
-	// creates a file name for each port
-	filename := fmt.Sprintf("%s.log", port)
 	// opens the file associated with the port and edits it based off of flags
 	// O_CREATE creates the file if it does not exist
 	// O_WRONLY writes to the file if it is empty

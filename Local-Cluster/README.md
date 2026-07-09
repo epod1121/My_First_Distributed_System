@@ -27,8 +27,10 @@
 
 ## What I learned through this project
 As this is my first project using git as well as my first project pertaining to distributed systems, I learned many things:
-- The Go language, including Go's os, fmt, and net/http packages
+- The Go language, including (but not limited to) Go's os, fmt, and net/http packages
 - Event-driven HTTP Go code, listeners, and Go closures
 - Quality and efficient code, freeing up resource leaks using "defer resp.Body.Close()"
 - Designing and implementing a distributed system
 - What goes into consensus algorithms to handle data flow and prevent split-brain
+- How to persistently store data
+- How to design bootstrap replay startups

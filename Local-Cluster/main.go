@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -20,9 +21,9 @@ func main() {
 	filename := fmt.Sprintf("%s.log", port)
 	// before all of the handle funcs, open previously logged data (if any)
 	// to read and have ready for each node
-	file, exist := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0644)
+	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0644)
 	// if the file does not exist, continue on
-	if exist != nil {
+	if err != nil {
 		fmt.Println("No file found")
 		// if the file does exist, read the contents of it
 	} else {
@@ -47,14 +48,16 @@ func main() {
 	http.HandleFunc("/prepare", func(w http.ResponseWriter, r *http.Request) {
 		prepareHandler(w, r, port)
 	})
-	http.HandleFunc("/read", readHandler)
+	http.HandleFunc("/read", func(w http.ResponseWriter, r *http.Request) {
+		readHandler(w, r, port)
+	})
 	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		statusHandler(w, r, port)
 	})
 
 	fmt.Printf("Starting server on port %s...\n", port)
 	// starting node at user given local host port
-	err := http.ListenAndServe(":"+port, nil)
+	err = http.ListenAndServe(":"+port, nil)
 	if err != nil {
 		fmt.Println("Server failed to start: ", err)
 	}
@@ -62,20 +65,37 @@ func main() {
 
 // used to handle key/value init from url
 // 2 phase commit
-// as well as handle primary node (in this case node 8001 was hard coded in for simplicity when testing)
+// as well as handle primary node (in this case node 8001
+// was hard coded in for simplicity when testing)
 func writeHandler(w http.ResponseWriter, r *http.Request, port string, filename string) {
 
-	// gets key and value stored
+	// stores key
 	key := r.URL.Query().Get("key")
+
+	// set a port to target all traffic to
+	targetPort := "8002"
+
+	// if the user enters a key, get the first letter
+	if len(key) > 0 {
+		firstLetter := key[0]
+
+		// if the first letter falls in the second half of the alphabet
+		if firstLetter >= 'n' && firstLetter <= 'z' {
+			// reroute that traffic to the 3rd node (sharding!)
+			targetPort = "8003"
+		}
+	}
+
+	// stores value
 	value := r.URL.Query().Get("value")
 
 	// node 8001 is primary node
 	if port == "8001" {
 		fmt.Println("Primary: --- Phase 1 ---")
 
-		// reaches out to node 8002 to write key and value
+		// reaches out to target port to write key and value
 		// as well as sees if it is ready to commit to storage
-		prepare := fmt.Sprintf("http://localhost:8002/prepare?key=%s&value=%s", key, value)
+		prepare := fmt.Sprintf("http://localhost:%s/prepare?key=%s&value=%s", targetPort, key, value)
 		resp, err := http.Get(prepare)
 		// checks if backup is ready
 		if err != nil || resp.StatusCode != http.StatusOK {
@@ -88,14 +108,12 @@ func writeHandler(w http.ResponseWriter, r *http.Request, port string, filename 
 
 		// phase 2 of 2PC
 		fmt.Println("Primary: --- Phase 2 ---")
-		commit := fmt.Sprintf("http://localhost:8002/write?key=%s&value=%s", key, value)
+		commit := fmt.Sprintf("http://localhost:%s/write?key=%s&value=%s", targetPort, key, value)
 		// writes the key value pair to storage
 		// go routine used so primary node does not have to wait for backup's writing to storage
 		go http.Get(commit)
+		fmt.Println("Primary: --- 2PC Complete ---\n")
 	}
-
-	// adds to database
-	database[key] = value
 
 	// opens the file associated with the port and edits it based off of flags
 	// O_CREATE creates the file if it does not exist
@@ -106,13 +124,17 @@ func writeHandler(w http.ResponseWriter, r *http.Request, port string, filename 
 	if err != nil {
 		fmt.Println("Error opening file")
 	}
-	// closes file to prevent corruption and leaking
-	defer file.Close()
 
-	fmt.Fprintf(file, "%s,%s\n", key, value)
+	if port != "8001" {
+		// adds to database
+		database[key] = value
 
-	// prints database to show consistency
-	fmt.Println("Database: ", database)
+		// closes file to prevent corruption and leaking
+		defer file.Close()
+		fmt.Fprintf(file, "%s,%s\n", key, value)
+		// prints database to show consistency
+		fmt.Println("Database: ", database)
+	}
 }
 
 // used to make sure a node is ready to commit a write
@@ -123,15 +145,38 @@ func prepareHandler(w http.ResponseWriter, r *http.Request, port string) {
 }
 
 // used to make sure the key exists
-func readHandler(w http.ResponseWriter, r *http.Request) {
+func readHandler(w http.ResponseWriter, r *http.Request, port string) {
 	key := r.URL.Query().Get("key")
-	value, exists := database[key]
 
+	if port == "8001" {
+
+		targetPort := "8002"
+
+		if len(key) > 0 && key[0] >= 'n' && key[0] <= 'z' {
+			targetPort = "8003"
+		}
+
+		shardURL := fmt.Sprintf("http://localhost:%s/read?key=%s", targetPort, key)
+
+		resp, err := http.Get(shardURL)
+		if err != nil {
+			http.Error(w, "Shard unreachable", http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
+
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+		return
+	}
+
+	value, exists := database[key]
 	if !exists {
 		http.Error(w, "Key not found: ", http.StatusNotFound)
-	} else {
-		fmt.Fprintf(w, "Key found: %v\n", value)
+		return
 	}
+
+	fmt.Fprintf(w, "Value: %s\n", value)
 }
 
 // shows database contents so it is easy to see if something is off

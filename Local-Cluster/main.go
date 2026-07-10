@@ -14,7 +14,7 @@ import (
 // global so it does not have to be passed from main
 var (
 	database          = make(map[string]string)
-	role              = "follower"
+	role              = "Follower"
 	currentTerm       = 0
 	votedFor          = ""
 	currentLeader     = ""
@@ -72,6 +72,8 @@ func main() {
 	})
 
 	fmt.Printf("Starting server on port %s...\n", port)
+	// go routine used to start election timeout counter
+	go startElectionTimeout(port)
 	// starting node at user given local host port
 	err = http.ListenAndServe(":"+port, nil)
 	if err != nil {
@@ -235,5 +237,100 @@ func heartbeatHandler(w http.ResponseWriter, r *http.Request, port string) {
 
 // handles votes
 func voteHandler(w http.ResponseWriter, r *http.Request, port string) {
+	candidate := r.URL.Query().Get("candidate")
 
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+
+	fmt.Printf("Node %s received vote request from Candidate %s\n", port, candidate)
+
+	if role == "Follower" {
+		w.WriteHeader(http.StatusOK)
+		fmt.Printf("Node %s voted YES for %s\n", port, candidate)
+		return
+	}
+
+	w.WriteHeader(http.StatusNotModified)
+}
+
+func startElectionTimeout(port string) {
+	for {
+		time.Sleep(200 * time.Millisecond)
+
+		stateMutex.Lock()
+		if role == "Leader" {
+			stateMutex.Unlock()
+			continue
+		}
+
+		timeSinceLastHeartbeat := time.Since(lastHeartbeatTime)
+
+		if timeSinceLastHeartbeat > 3 * time.Second {
+			fmt.Printf("Node %s: Master has timed out - No heartbeat for %v.\nStarting election\n", port, timeSinceLastHeartbeat)
+			launchElection(port)
+		}
+
+		stateMutex.Unlock()
+	}
+}
+
+func launchElection(port string) {
+	role = "Candidate"
+	currentTerm++
+	votedFor = port
+	votesReceived := 1
+	fmt.Printf("Node %s: Starting term %d - voting for self\n", port, currentTerm)
+
+	allPorts := []string{"8001 ", "8002", "8003"}
+
+	for _, peerPort := range allPorts {
+		if peerPort == port {
+			continue
+		}
+
+		voteURL := fmt.Sprintf("http:/localhost:%s/request-vote?candidate=%s&term=%d", peerPort, port, currentTerm)
+
+		resp, err := http.Get(voteURL)
+		if err != nil {
+			continue
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			votesReceived++
+		}
+	}
+
+	if votesReceived >= 2 {
+		fmt.Printf("Node %s won the election with %d votes\n", port, votesReceived)
+		role = "Leader"
+		currentLeader = port
+		go startHeartbeatTicker(port)
+	} else {
+		fmt.Printf("Node %s failed election - lost majority with %d votes", port, votesReceived)
+		role = "Follower"
+	}
+}
+
+func startHeartbeatTicker(port string){
+	ticker := time.NewTicker(1 * time.Second)
+	allPorts := []string{"8001", "8002", "8003"}
+
+	for range ticker.C {
+		stateMutex.Lock()
+		if role != "Leader" {
+			stateMutex.Unlock()
+			ticker.Stop()
+			return
+		}
+		stateMutex.Unlock()
+
+		for _, peerPort := range allPorts {
+			if peerPort == port {
+				continue
+			}
+
+			heartbeatURL := fmt.Sprintf("http://localhost:%s/heartbeat?leader=%s", peerPort, port)
+			go http.Get(heartbeatURL)
+		}
+	}
 }

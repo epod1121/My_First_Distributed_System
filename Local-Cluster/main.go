@@ -7,10 +7,20 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 )
 
 // global so it does not have to be passed from main
-var database = make(map[string]string)
+var (
+	database          = make(map[string]string)
+	role              = "follower"
+	currentTerm       = 0
+	votedFor          = ""
+	currentLeader     = ""
+	stateMutex        sync.Mutex
+	lastHeartbeatTime = time.Now()
+)
 
 func main() {
 	// reads the port input from the user when initializing node
@@ -53,6 +63,12 @@ func main() {
 	})
 	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		statusHandler(w, r, port)
+	})
+	http.HandleFunc("/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		heartbeatHandler(w, r, port)
+	})
+	http.HandleFunc("/request-vote", func(w http.ResponseWriter, r *http.Request) {
+		voteHandler(w, r, port)
 	})
 
 	fmt.Printf("Starting server on port %s...\n", port)
@@ -182,4 +198,23 @@ func readHandler(w http.ResponseWriter, r *http.Request, port string) {
 // shows database contents so it is easy to see if something is off
 func statusHandler(w http.ResponseWriter, r *http.Request, port string) {
 	fmt.Fprintf(w, "Port: %s\nDatabase contents: %v\n", port, database)
+}
+
+func heartbeatHandler(w http.ResponseWriter, r *http.Request, port string) {
+	leaderPort := r.URL.Query().Get("leader")
+
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+
+	fmt.Printf("Node %s: Recieved heartbeat from leader %s\n", port, leaderPort)
+
+	currentLeader = leaderPort
+	role = "Follower"
+
+	lastHeartbeatTime = time.Now()
+	w.WriteHeader(http.StatusOK)
+}
+
+func voteHandler(w http.ResponseWriter, r *http.Request, port string) {
+
 }

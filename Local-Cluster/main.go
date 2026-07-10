@@ -162,30 +162,41 @@ func prepareHandler(w http.ResponseWriter, r *http.Request, port string) {
 
 // used to make sure the key exists
 func readHandler(w http.ResponseWriter, r *http.Request, port string) {
+	// gets the key from the URL
 	key := r.URL.Query().Get("key")
 
+	// first statement handles leader fetching
+	// if the port is the leader
 	if port == "8001" {
 
+		// sets a target port
 		targetPort := "8002"
 
+		// if the key starts with a letter in the second half of the alphabet
+		// change the target port to the port that holds that hashed key
 		if len(key) > 0 && key[0] >= 'n' && key[0] <= 'z' {
 			targetPort = "8003"
 		}
 
+		// stores the target port URL
 		shardURL := fmt.Sprintf("http://localhost:%s/read?key=%s", targetPort, key)
 
+		// sends the reques to get it, if it is not available print so
 		resp, err := http.Get(shardURL)
 		if err != nil {
 			http.Error(w, "Shard unreachable", http.StatusInternalServerError)
 			return
 		}
+		// close to prevent leaking
 		defer resp.Body.Close()
 
+		// writes the value
 		w.WriteHeader(resp.StatusCode)
 		io.Copy(w, resp.Body)
 		return
 	}
 
+	// if the value is not in the
 	value, exists := database[key]
 	if !exists {
 		http.Error(w, "Key not found: ", http.StatusNotFound)
@@ -200,21 +211,29 @@ func statusHandler(w http.ResponseWriter, r *http.Request, port string) {
 	fmt.Fprintf(w, "Port: %s\nDatabase contents: %v\n", port, database)
 }
 
+// handles heartbeats
 func heartbeatHandler(w http.ResponseWriter, r *http.Request, port string) {
+	// gets the leader value from the URL
 	leaderPort := r.URL.Query().Get("leader")
 
+	// later lock and unlock statement as a placeholder
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
+	// prints confirmation of heatbeat recieved
 	fmt.Printf("Node %s: Recieved heartbeat from leader %s\n", port, leaderPort)
 
+	// role change
 	currentLeader = leaderPort
 	role = "Follower"
 
+	// adds global heartbeat time
 	lastHeartbeatTime = time.Now()
+	// confirmation of working
 	w.WriteHeader(http.StatusOK)
 }
 
+// handles votes
 func voteHandler(w http.ResponseWriter, r *http.Request, port string) {
 
 }

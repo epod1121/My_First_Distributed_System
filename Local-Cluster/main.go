@@ -218,12 +218,12 @@ func heartbeatHandler(w http.ResponseWriter, r *http.Request, port string) {
 	// gets the leader value from the URL
 	leaderPort := r.URL.Query().Get("leader")
 
-	// later lock and unlock statement as a placeholder
+	// lock so one at a time for the func
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
-	// prints confirmation of heatbeat recieved
-	fmt.Printf("Node %s: Recieved heartbeat from leader %s\n", port, leaderPort)
+	// prints confirmation of heartbeat received
+	fmt.Printf("Node %s: Received heartbeat from leader %s\n", port, leaderPort)
 
 	// role change
 	currentLeader = leaderPort
@@ -237,26 +237,35 @@ func heartbeatHandler(w http.ResponseWriter, r *http.Request, port string) {
 
 // handles votes
 func voteHandler(w http.ResponseWriter, r *http.Request, port string) {
+	// return node number
 	candidate := r.URL.Query().Get("candidate")
 
+	// lock so one at a time for func
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 
+	// prints the votes received from each candidate
 	fmt.Printf("Node %s received vote request from Candidate %s\n", port, candidate)
 
+	// if the node is a follower, make sure it is up and running
+	// and print the yes vote
 	if role == "Follower" {
 		w.WriteHeader(http.StatusOK)
 		fmt.Printf("Node %s voted YES for %s\n", port, candidate)
 		return
 	}
 
+	// if no vote, send status update
 	w.WriteHeader(http.StatusNotModified)
 }
 
 func startElectionTimeout(port string) {
+	// while loop but just using for (go thing)
 	for {
+		// sleep the checks so it does not run crazy fast in the background
 		time.Sleep(200 * time.Millisecond)
 
+		// checks if the leader is alive
 		stateMutex.Lock()
 		if role == "Leader" {
 			stateMutex.Unlock()
@@ -265,6 +274,7 @@ func startElectionTimeout(port string) {
 
 		timeSinceLastHeartbeat := time.Since(lastHeartbeatTime)
 
+		// if it has been more than 3 seconds, leader is presumed dead
 		if timeSinceLastHeartbeat > 3 * time.Second {
 			fmt.Printf("Node %s: Master has timed out - No heartbeat for %v.\nStarting election\n", port, timeSinceLastHeartbeat)
 			launchElection(port)
@@ -275,6 +285,7 @@ func startElectionTimeout(port string) {
 }
 
 func launchElection(port string) {
+	// change variables dealing with node
 	role = "Candidate"
 	currentTerm++
 	votedFor = port
@@ -283,29 +294,37 @@ func launchElection(port string) {
 
 	allPorts := []string{"8001 ", "8002", "8003"}
 
+	// for each port in range
 	for _, peerPort := range allPorts {
 		if peerPort == port {
 			continue
 		}
 
+		// sends vote to candidate abd updates term
 		voteURL := fmt.Sprintf("http:/localhost:%s/request-vote?candidate=%s&term=%d", peerPort, port, currentTerm)
 
+		// if the vote gets sent
 		resp, err := http.Get(voteURL)
 		if err != nil {
 			continue
 		}
 
+		// send ok status and update votes
 		if resp.StatusCode == http.StatusOK {
 			votesReceived++
 		}
 	}
 
+
+	// if majority of votes, new leader
 	if votesReceived >= 2 {
 		fmt.Printf("Node %s won the election with %d votes\n", port, votesReceived)
 		role = "Leader"
 		currentLeader = port
+		// go routine starts heartbeat
 		go startHeartbeatTicker(port)
 	} else {
+		// if no node got majority reset
 		fmt.Printf("Node %s failed election - lost majority with %d votes", port, votesReceived)
 		role = "Follower"
 	}
@@ -315,20 +334,25 @@ func startHeartbeatTicker(port string){
 	ticker := time.NewTicker(1 * time.Second)
 	allPorts := []string{"8001", "8002", "8003"}
 
+	// send heartbeat into go channel every second
 	for range ticker.C {
+		// lock so only one at a time
 		stateMutex.Lock()
 		if role != "Leader" {
 			stateMutex.Unlock()
+			// prevents memory leak
 			ticker.Stop()
 			return
 		}
 		stateMutex.Unlock()
 
+		// for port in range
 		for _, peerPort := range allPorts {
 			if peerPort == port {
 				continue
 			}
-
+			
+			// send heartbeat response to leader
 			heartbeatURL := fmt.Sprintf("http://localhost:%s/heartbeat?leader=%s", peerPort, port)
 			go http.Get(heartbeatURL)
 		}

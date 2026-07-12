@@ -143,7 +143,7 @@ func writeHandler(w http.ResponseWriter, r *http.Request, port string, filename 
 		fmt.Println("Error opening file")
 	}
 
-	if port != "8001" {
+	if port != currentLeader {
 		// adds to database
 		database[key] = value
 
@@ -169,7 +169,7 @@ func readHandler(w http.ResponseWriter, r *http.Request, port string) {
 
 	// first statement handles leader fetching
 	// if the port is the leader
-	if port == "8001" {
+	if port == currentLeader {
 
 		// sets a target port
 		targetPort := "8002"
@@ -277,7 +277,9 @@ func startElectionTimeout(port string) {
 		// if it has been more than 3 seconds, leader is presumed dead
 		if timeSinceLastHeartbeat > 3 * time.Second {
 			fmt.Printf("Node %s: Master has timed out - No heartbeat for %v.\nStarting election\n", port, timeSinceLastHeartbeat)
+			stateMutex.Unlock()
 			launchElection(port)
+			continue
 		}
 
 		stateMutex.Unlock()
@@ -292,7 +294,7 @@ func launchElection(port string) {
 	votesReceived := 1
 	fmt.Printf("Node %s: Starting term %d - voting for self\n", port, currentTerm)
 
-	allPorts := []string{"8001 ", "8002", "8003"}
+	allPorts := []string{"8001", "8002", "8003"}
 
 	// for each port in range
 	for _, peerPort := range allPorts {
@@ -301,7 +303,7 @@ func launchElection(port string) {
 		}
 
 		// sends vote to candidate abd updates term
-		voteURL := fmt.Sprintf("http:/localhost:%s/request-vote?candidate=%s&term=%d", peerPort, port, currentTerm)
+		voteURL := fmt.Sprintf("http://localhost:%s/request-vote?candidate=%s&term=%d", peerPort, port, currentTerm)
 
 		// if the vote gets sent
 		resp, err := http.Get(voteURL)
